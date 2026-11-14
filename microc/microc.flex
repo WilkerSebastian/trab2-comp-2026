@@ -19,8 +19,6 @@
 
 %option prefix="microc_yy"
 %option noyywrap
-%option nounput
-%option noinput
 
 %{
 #include <stdio.h>
