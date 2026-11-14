@@ -17,41 +17,19 @@
  *      ./lexer test.mc
  */
 
+%option prefix="microc_yy"
+%option noyywrap
+%option nounput
+%option noinput
+
 %{
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
-
-/* ---------------------------------------------------------------------
- * 1. VOCABULARIO DE TOKENS (equivalente a tokens.h)
- * ------------------------------------------------------------------- */
-
-typedef enum {
-    /* Tokens fundamentais */
-    UNDEF,          /* token indefinido (usado para reportar erros) */
-    ID,             /* identificador                                */
-    END_OF_FILE,    /* fim de arquivo                                */
-
-    /* Constantes literais */
-    INTEGERCONST,
-    CHARCONST,
-    STRINGCONST,
-
-    /* Operadores aritmeticos */
-    PLUS, MINUS, MUL, DIV, MOD,
-
-    /* Operadores relacionais e logicos */
-    EQ, NEQ, LT, GT, LEQ, GEQ, AND, OR, NOT,
-
-    /* Simbolos de atribuicao e pontuacao */
-    ASSIGN, SEMICOLON, COMMA, LPAREN, RPAREN,
-    LBRACE, RBRACE, LBRACKET, RBRACKET,
-
-    /* Palavras reservadas */
-    MAIN, IF, ELSE, FOR, RETURN, INT, CHAR, PRINT
-} TokenType;
+#include "tokens.h"
+#include "tabela_strings.h"
 
 /* ---------------------------------------------------------------------
  * Inicio implementação tabela hash
@@ -121,7 +99,7 @@ static uint64_t hashSDBM(const char *str) {
 
 }
 
-static void initHashTable() {
+void initHashTable() {
 
     if (hashTable != NULL) 
         return;
@@ -200,7 +178,7 @@ static StringNode *LookupInsertStr(const char *str) {
 
 }
 
-static void destroyHashTable() {
+void destroyHashTable() {
 
     if (hashTable == NULL) 
         return;
@@ -531,59 +509,3 @@ ALFANUM     [a-zA-Z0-9_]
                     }
 
 %%
-
-/* -----------------------------------------------------------------------
- * 4. SUB-ROTINAS DO USUARIO
- * ------------------------------------------------------------------- */
-
-/* yywrap: informa ao flex que, ao atingir o EOF, a leitura deve
- * simplesmente parar (nao ha um proximo arquivo a processar). */
-int yywrap(void) {
-    return 1;
-}
-
-/* main() de teste: le o arquivo passado como argumento e imprime, para
- * cada token reconhecido, seu tipo, lexema e linha -- no mesmo espirito
- * do utilitario "lexer" mencionado no enunciado (Secao 6). Este main()
- * e apenas uma ferramenta de depuracao para voce testar seu scanner de
- * forma isolada; ele NAO faz parte da interface formal entre o scanner
- * e o parser (isso sera tratado nos trabalhos seguintes). */
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Uso: %s <arquivo.mc>\n", argv[0]);
-        return 1;
-    }
-
-    FILE *arquivo_fonte = fopen(argv[1], "r");
-    if (!arquivo_fonte) {
-        fprintf(stderr, "Erro: nao foi possivel abrir o arquivo '%s'\n", argv[1]);
-        return 1;
-    }
-    yyin = arquivo_fonte;
-
-    int tipo;
-
-    initHashTable();
-
-    while ((tipo = yylex()) != END_OF_FILE) {
-        if (tipo == UNDEF) {
-            fprintf(stderr, "ERRO LEXICO (linha %d): %s\n",
-                    linha_atual, microc_yylval.error_msg);
-            continue;
-        }
-
-        char *lexeme = yytext;
-
-        if (tipo == ID || tipo == INTEGERCONST || tipo == CHARCONST || tipo == STRINGCONST)
-            lexeme = microc_yylval.symbol;
-
-        printf("Token: tipo = %-13s lexema = '%s'  linha = %d\n",
-        nome_token[tipo], lexeme, linha_atual);
-        
-    }
-
-    destroyHashTable();
-
-    fclose(arquivo_fonte);
-    return 0;
-}

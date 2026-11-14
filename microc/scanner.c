@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "scanner.h"
+#include "tabela_strings.h"
 
 /* ---- simbolos do scanner gerado pelo flex (ajuste ao seu TP1) ---- */
 extern int   microc_yylex(void);
@@ -27,13 +28,19 @@ extern int   microc_yylex_destroy(void);
 
 /* Texto a guardar em Token.lexema para o token que microc_yylex acabou
  * de devolver. */
-static const char *texto_do_lexema(int tipo)
-{
+static const char *texto_do_lexema(int tipo) {
+
     /* TODO(aluno): para ID, INTEGERCONST, CHARCONST e STRINGCONST, devolva
      * o texto do Symbol em microc_yylval.symbol; para UNDEF, devolva
      * microc_yylval.error_msg. */
-    (void) tipo;
+    if (tipo == ID || tipo == INTEGERCONST || tipo == CHARCONST || tipo == STRINGCONST)
+        return microc_yylval.symbol;
+
+    if (tipo == UNDEF)
+        return microc_yylval.error_msg;
+    
     return microc_yytext;
+
 }
 
 /* O TP1 permite que tokens de um caractere sejam devolvidos pelo proprio
@@ -95,6 +102,6 @@ Token proximo_token(void)
 
 void scanner_finalizar(void)
 {
-    /* TODO(aluno): liberar tambem a tabela de strings do TP1. */
+    destroyHashTable();
     microc_yylex_destroy();
 }
