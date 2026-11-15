@@ -62,15 +62,111 @@ void conj_imprimir(FILE *f, const Gramatica *g)
 /* A implementar                                                      */
 /* ------------------------------------------------------------------ */
 
-/* TODO(aluno): calcular e->anulavel para cada no Expr e g->nts[i].anulavel.
- *   E_TERM: 0        E_VAZIO: 1        E_NAOTERM: anulavel do nao terminal
- *   E_SEQ: 1 se todos os filhos forem anulaveis
- *   E_ALT: 1 se algum filho for anulavel
- *   E_OPC, E_REP: 1 (calcule tambem o do filho)
- * Repita ate nada mudar. */
-void conj_anulavel(Gramatica *g)
-{
-    (void) g;
+static void atualizar_anulavel(Expr *e, const Gramatica *g, int *mudou) {
+
+    int i;
+    
+    int novo = 0;
+
+    for (i = 0; i < e->nfilhos; i++)
+        atualizar_anulavel(e->filhos[i], g, mudou);
+
+    switch (e->tipo) {
+
+        case E_TERM:
+
+            novo = 0;
+
+            break;
+
+        case E_VAZIO:
+
+            novo = 1;
+
+            break;
+
+        case E_NAOTERM:
+
+            novo = g->nts[e->simbolo].anulavel;
+
+            break;
+
+        case E_SEQ:
+
+            novo = 1;
+
+            for (i = 0; i < e->nfilhos; i++)
+                if (!e->filhos[i]->anulavel) {
+
+                    novo = 0;
+
+                    break;
+
+                }
+
+            break;
+
+        case E_ALT:
+
+            novo = 0;
+
+            for (i = 0; i < e->nfilhos; i++)
+                if (e->filhos[i]->anulavel) {
+
+                    novo = 1;
+
+                    break;
+
+                }
+
+            break;
+
+        case E_OPC:
+        case E_REP:
+
+            novo = 1;
+
+            break;
+
+    }
+
+    if (novo != e->anulavel) {
+
+        e->anulavel = novo;
+
+        *mudou = 1;
+
+    }
+
+}
+
+void conj_anulavel(Gramatica *g) {
+
+    int mudou = 1, i;
+
+    while (mudou) {
+ 
+        mudou = 0;
+        
+        for (i = 0; i < g->nnts; i++) {
+
+            if (g->nts[i].regra == NULL)
+                continue;
+
+            atualizar_anulavel(g->nts[i].regra, g, &mudou);
+
+            if (g->nts[i].regra->anulavel != g->nts[i].anulavel) {
+    
+                g->nts[i].anulavel = g->nts[i].regra->anulavel;
+
+                mudou = 1;
+    
+            }
+    
+        }
+    
+    }
+
 }
 
 /* TODO(aluno): calcular e->first para cada no Expr e g->nts[i].first.
