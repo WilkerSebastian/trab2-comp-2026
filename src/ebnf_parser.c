@@ -84,40 +84,136 @@ static void sincronizar(Parser *p)
 
 static Expr *parse_expr(Parser *p);
 
-/*
- * TODO(aluno): implementar as funcoes abaixo seguindo a gramatica da
- * notacao (cabecalho deste arquivo), uma funcao por nao terminal:
- *
- *   static Expr *parse_expr(Parser *p);   expr  = seq { "|" seq } ;
- *   static Expr *parse_seq(Parser *p);    seq   = { fator } ;
- *   static Expr *parse_fator(Parser *p);  fator = NOME_TERM | LITERAL | ...
- *
- * Dicas:
- *   - O token corrente esta em p->tok (tipo, texto, linha, coluna);
- *     avancar(p) consome-o e esperar(p, MT_...) consome um token exigido.
- *   - Terminais: gram_terminal(p->g, texto, literal, linha, coluna)
- *     devolve o indice; crie o no com expr_simbolo(E_TERM, ...).
- *   - Nao terminais: gram_naoterminal(...) e expr_simbolo(E_NAOTERM, ...).
- *   - [ a ] e { a }: expr_unario(E_OPC, a, ...) e expr_unario(E_REP, a, ...).
- *   - ( a ) nao cria no: devolva a propria arvore de a.
- *   - Evite nos com um unico filho: uma sequencia com um so fator ou
- *     uma alternativa unica devem ser devolvidas diretamente.
- *   - Uma sequencia vazia (ex.: "a = ;" ou "b | ") vira E_VAZIO.
- *
- * O stub abaixo apenas descarta o lado direito da regra, para que o
- * gerador compile e execute de ponta a ponta. Substitua-o.
- */
-static Expr *parse_expr(Parser *p)
-{
-    static int avisado = 0;
+static int inicia_fator(const MetaToken *t) {
+
+    return t->tipo == MT_NOME_TERM || t->tipo == MT_LITERAL || t->tipo == MT_NAOTERM   || t->tipo == MT_ABRE_PAR || t->tipo == MT_ABRE_COL  || t->tipo == MT_ABRE_CHAVE;
+
+}
+
+static Expr *parse_fator(Parser *p) {
+
     int l = p->tok.linha, c = p->tok.coluna;
-    if (!avisado) {
-        diag_aviso(l, c, "parse_expr ainda nao implementado: regras lidas como vazias");
-        avisado = 1;
+    
+    int indice;
+    
+    Expr *interno;
+
+    switch (p->tok.tipo) {
+
+        case MT_NOME_TERM:
+
+            indice = gram_terminal(p->g, p->tok.texto, 0, l, c);
+        
+            avancar(p);
+        
+            return expr_simbolo(E_TERM, indice, l, c);
+
+        case MT_LITERAL:
+
+            indice = gram_terminal(p->g, p->tok.texto, 1, l, c);
+
+            avancar(p);
+
+            return expr_simbolo(E_TERM, indice, l, c);
+
+        case MT_NAOTERM:
+
+            indice = gram_naoterminal(p->g, p->tok.texto, l, c);
+
+            avancar(p);
+
+            return expr_simbolo(E_NAOTERM, indice, l, c);
+
+        case MT_ABRE_PAR:
+
+            avancar(p);
+
+            interno = parse_expr(p);
+
+            esperar(p, MT_FECHA_PAR);
+
+            return interno;
+
+        case MT_ABRE_COL:
+
+            avancar(p);
+
+            interno = parse_expr(p);
+
+            esperar(p, MT_FECHA_COL);
+
+            return expr_unario(E_OPC, interno, l, c);
+
+        case MT_ABRE_CHAVE:
+
+            avancar(p);
+
+            interno = parse_expr(p);
+
+            esperar(p, MT_FECHA_CHAVE);
+
+            return expr_unario(E_REP, interno, l, c);
+
+        default:
+
+            erro_encontrado(p, "erro ao processar fator");
+
+            return expr_criar(E_VAZIO, l, c);
+
     }
-    while (p->tok.tipo != MT_PV && p->tok.tipo != MT_FIM)
+
+}
+
+static Expr *parse_seq(Parser *p) {
+
+    int l = p->tok.linha, c = p->tok.coluna;
+
+    Expr *primeiro, *seq;
+
+    if (!inicia_fator(&p->tok))
+        return expr_criar(E_VAZIO, l, c);
+
+    primeiro = parse_fator(p);
+
+    if (!inicia_fator(&p->tok))
+        return primeiro;
+
+    seq = expr_criar(E_SEQ, l, c);
+
+    expr_adicionar(seq, primeiro);
+
+    while (inicia_fator(&p->tok))
+        expr_adicionar(seq, parse_fator(p));
+
+    return seq;
+
+}
+
+static Expr *parse_expr(Parser *p) {
+    
+    int l = p->tok.linha, c = p->tok.coluna;
+    
+    Expr *primeiro, *alt;
+
+    primeiro = parse_seq(p);
+
+    if (p->tok.tipo != MT_BARRA)
+        return primeiro;
+
+    alt = expr_criar(E_ALT, l, c);
+
+    expr_adicionar(alt, primeiro);
+
+    while (p->tok.tipo == MT_BARRA) {
+
         avancar(p);
-    return expr_criar(E_VAZIO, l, c);
+
+        expr_adicionar(alt, parse_seq(p));
+    
+    }
+
+    return alt;
+
 }
 
 /* ------------------------------------------------------------------ */
