@@ -42,19 +42,158 @@ static void reportar(const Gramatica *g, int nt, const Expr *e, int eh_aviso,
     fputc('\n', stderr);
 }
 
-/* TODO(aluno): percorrer as regras e, para cada no E_ALT, E_OPC e E_REP,
- * verificar as condicoes do cabecalho. Use bitset_intersecao/bitset_vazio
- * e reporte com reportar(...), por exemplo:
- *
- *   reportar(g, nt, e, 0, &comum, "alternativas %d e %d comecam com", i+1, j+1);
- *
- * que imprime:
- *   expr.ebnf:7:10: erro: conflito LL(1) em stmt: alternativas 1 e 2 comecam com {ID}
- *
- * Retorne o numero de ERROS (avisos nao contam). */
-int ll1_verificar(const Gramatica *g)
-{
-    (void) reportar;
-    (void) g;
+static int verificar_alt(const Gramatica *g, int nt, const Expr *e) {
+
+    Bitset comum;
+    
+    int i; 
+
+    int j; 
+
+    int erros = 0;
+
+    int anulaveis = 0;
+
+    bitset_iniciar(&comum, g->nterms);
+
+    for (i = 0; i < e->nfilhos; i++)
+        for (j = i + 1; j < e->nfilhos; j++) {
+
+            bitset_intersecao(&comum, &e->filhos[i]->first, &e->filhos[j]->first);
+
+            if (!bitset_vazio(&comum)) {
+
+                reportar(g, nt, e, 0, &comum, "alternativas %d e %d comecam com", i + 1, j + 1);
+
+                erros++;
+
+            }
+
+        }
+
+    for (i = 0; i < e->nfilhos; i++)
+        if (e->filhos[i]->anulavel)
+            anulaveis++;
+
+    if (anulaveis > 1) {
+
+        for (i = 0; i < e->nfilhos; i++)
+            for (j = i + 1; j < e->nfilhos; j++)
+                if (e->filhos[i]->anulavel && e->filhos[j]->anulavel) {
+
+                    reportar(g, nt, e, 0, NULL, "alternativas %d e %d sao ambas anulaveis", i + 1, j + 1);
+
+                    erros++;
+
+                }
+
+    }
+
+    for (i = 0; i < e->nfilhos; i++) {
+
+        if (!e->filhos[i]->anulavel)
+            continue;
+
+        for (j = 0; j < e->nfilhos; j++) {
+
+            if (j == i)
+                continue;
+
+            bitset_intersecao(&comum, &e->follow, &e->filhos[j]->first);
+
+            if (!bitset_vazio(&comum)) {
+    
+                reportar(g, nt, e, 0, &comum, "alternativa %d e anulavel e o FOLLOW intersecta o FIRST da alternativa %d em", i + 1, j + 1);
+
+                erros++;
+
+            }
+
+        }
+
+    }
+
+    bitset_liberar(&comum);
+
+    return erros;
+
+}
+
+static int verificar_opc_rep(const Gramatica *g, int nt, const Expr *e) {
+
+    Bitset comum;
+
+    const Expr *conteudo = e->filhos[0];
+
+    const char *rotulo = (e->tipo == E_OPC) ? "[ ]" : "{ }";
+
+    if (conteudo->anulavel) {
+
+        reportar(g, nt, e, 0, NULL, "o conteudo de %s e anulavel", rotulo);
+
+        return 1;
+
+    }
+
+    bitset_iniciar(&comum, g->nterms);
+    
+    bitset_intersecao(&comum, &conteudo->first, &e->follow);
+    
+    if (!bitset_vazio(&comum))
+        reportar(g, nt, e, 1, &comum, "FIRST e FOLLOW de %s se intersectam em", rotulo);
+    
+    bitset_liberar(&comum);
+
     return 0;
+
+}
+
+static int verificar_expr(const Gramatica *g, int nt, const Expr *e) {
+
+    int i;
+
+    int erros = 0;
+
+    if (e == NULL)
+        return 0;
+
+    switch (e->tipo) {
+
+        case E_ALT:
+
+            erros += verificar_alt(g, nt, e);
+
+            break;
+        
+        case E_OPC:
+        case E_REP:
+
+            erros += verificar_opc_rep(g, nt, e);
+
+            break;
+
+        default:
+            break;
+
+    }
+
+    for (i = 0; i < e->nfilhos; i++)
+        erros += verificar_expr(g, nt, e->filhos[i]);
+
+    return erros;
+
+}
+
+int ll1_verificar(const Gramatica *g) {
+
+    int i;
+    
+    int erros = 0;
+
+    for (i = 0; i < g->nnts; i++)
+        if (g->nts[i].regra != NULL)
+            erros += verificar_expr(g, i, g->nts[i].regra);
+
+    return erros;
+
 }
