@@ -270,40 +270,112 @@ static void emit_erro(Emissor *em, const Bitset *esperados)
 /* Traducao das expressoes (esquema da secao 4 do enunciado)          */
 /* ------------------------------------------------------------------ */
 
-static void gen_expr(Emissor *em, const Gramatica *g, const Expr *e)
-{
+static void gen_expr(Emissor *em, const Gramatica *g, const Expr *e) {
+
+    int i = 0;
+
+    int anul = -1;
+
+    int primeiro = 1;
 
     switch (e->tipo) {
-    case E_TERM:
-        emit(em, "match(%s);", g->terms[e->simbolo].nome_c);
-        break;
-    case E_NAOTERM:
-        emit(em, "parse_%s();", g->nts[e->simbolo].nome);
-        break;
-    /*
-     * TODO(aluno): traduzir as demais construcoes (secao 4):
-     *
-     *   E_SEQ   a1 a2 ... an   ->  gen_expr de cada filho, em ordem
-     *   E_ALT   a1 | ... | an  ->  if (FIRST(a1)) {...} else if ... else erro
-     *   E_OPC   [ a ]          ->  if (FIRST(a)) { ... }
-     *   E_REP   { a }          ->  while (FIRST(a)) { ... }
-     *   E_VAZIO                ->  nada
-     *
-     * Ferramentas disponiveis neste arquivo:
-     *   emit(em, fmt, ...)                 uma linha indentada
-     *   em->nivel++ / em->nivel--          indentacao dos blocos
-     *   emit_teste(em, "if (", g, &x->first, ") {")
-     *   emit_erro(em, &e->first)           erro_sintatico com os esperados
-     * Os conjuntos FIRST de cada no foram calculados em conjuntos.c.
-     * Uma alternativa anulavel nao tem teste: ela fica no else final,
-     * no lugar do erro.
-     */
-    default:
-        emit(em, "/* TODO(aluno): construcao ainda nao traduzida */");
-        (void) emit_teste;
-        (void) emit_erro;
-        break;
+
+        case E_TERM:
+        
+            emit(em, "match(%s);", g->terms[e->simbolo].nome_c);
+            
+            break;
+
+        case E_NAOTERM:
+
+            emit(em, "parse_%s();", g->nts[e->simbolo].nome);
+
+            break;
+
+        case E_SEQ:
+
+            for (i = 0; i < e->nfilhos; i++)
+                gen_expr(em, g, e->filhos[i]);
+            
+            break;
+
+        case E_ALT:
+            
+            for (i = 0; i < e->nfilhos; i++)
+                if (e->filhos[i]->anulavel)
+                    anul = i;
+            
+            for (i = 0; i < e->nfilhos; i++) {
+
+                if (i == anul)
+                    continue;
+                
+                if (primeiro)
+                    emit_teste(em, "if (", g, &e->filhos[i]->first, ") {");
+                
+                else
+                    emit_teste(em, "} else if (", g, &e->filhos[i]->first, ") {");
+                
+                
+                primeiro = 0;
+                
+                em->nivel++;
+
+                gen_expr(em, g, e->filhos[i]);
+
+                em->nivel--;
+
+            }
+
+            emit(em, "} else {");
+
+            em->nivel++;
+
+            if (anul >= 0)
+                gen_expr(em, g, e->filhos[anul]);
+    
+            else
+                emit_erro(em, &e->first);
+            
+            em->nivel--;
+            
+            emit(em, "}");
+            
+            break;
+        
+        case E_OPC:
+
+            emit_teste(em, "if (", g, &e->filhos[0]->first, ") {");
+
+            em->nivel++;
+
+            gen_expr(em, g, e->filhos[0]);
+
+            em->nivel--;
+
+            emit(em, "}");
+
+            break;
+
+        case E_REP:
+
+            emit_teste(em, "while (", g, &e->filhos[0]->first, ") {");
+
+            em->nivel++;
+
+            gen_expr(em, g, e->filhos[0]);
+
+            em->nivel--;
+
+            emit(em, "}");
+
+            break;
+
+        case E_VAZIO:
+            break;
+
     }
+
 }
 
 /* ------------------------------------------------------------------ */
