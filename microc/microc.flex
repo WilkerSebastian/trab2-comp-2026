@@ -215,11 +215,6 @@ static const char *nome_token[] = {
 };
 
 /* Valor semantico do token corrente. */
-typedef struct {
-    char *symbol;      /* lexema para ID, INTEGERCONST, CHARCONST, STRINGCONST */
-    char *error_msg;   /* mensagem de erro, usada apenas quando tipo == UNDEF   */
-} YYSTYPE;
-
 YYSTYPE microc_yylval;
 
 /* Linha atual do arquivo-fonte sendo processado. Deve ser incrementada
