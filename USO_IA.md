@@ -1,12 +1,6 @@
 ## USO_IA.md
 
-Registre aqui cada uso relevante de ferramentas de IA generativa, como no TP1. Se nenhuma foi usada, deixe apenas a frase:
-
-Nenhuma ferramenta de IA foi utilizada no desenvolvimento deste trabalho.
-
-Modelo de entrada:
-
-    Ferramenta: <ferramenta e modelo>
-    Trecho:     <arquivo ou parte do trabalho>
-    Finalidade: <o que foi pedido, de forma especifica>
-    O que fiz:  <usado integralmente, adaptado ou apenas consultado>
+Ferramenta: Qwen 3.8
+Trecho: microc/microc.flex diretivas do %option
+Finalidade: Entender o papel das diretivas %option prefix="microc_yy" e %option noyywrap exigidas pela integração do TP1 com o TP2, e por que elas são necessárias para o scanner.c fornecido conseguir linkar com o código gerado pelo flex.
+O que fiz: Apenas consultado. A explicação foi usada para compreender as diretivas e aplicá-las corretamente no microc.flex; o código foi escrito e ajustado por mim.
