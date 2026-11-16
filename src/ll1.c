@@ -140,7 +140,7 @@ static int verificar_opc_rep(const Gramatica *g, int nt, const Expr *e) {
     bitset_intersecao(&comum, &conteudo->first, &e->follow);
     
     if (!bitset_vazio(&comum))
-        reportar(g, nt, e, 1, &comum, "FIRST e FOLLOW de %s se intersectam em", rotulo);
+        reportar(g, nt, e, 1, &comum, "FIRST e FOLLOW de %s se intersectam (resolvido de forma gulosa) em", rotulo);
     
     bitset_liberar(&comum);
 
