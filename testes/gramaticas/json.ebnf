@@ -1,0 +1,22 @@
+(* Gramatica tipo JSON *)
+TOKENS
+NUM    = /[0-9]+/ ;
+STRING = /"[^"]*"/ ;
+SKIP   = /[ \t\r\n]+/ ;
+
+RULES
+documento = valor ;
+
+valor = objeto
+      | array
+      | STRING
+      | NUM
+      | "true"
+      | "false"
+      | "null" ;
+
+objeto = "{" [ par_chave_valor { "," par_chave_valor } ] "}" ;
+
+par_chave_valor = STRING ":" valor ;
+
+array = "[" [ valor { "," valor } ] "]" ;

@@ -1,0 +1,13 @@
+{
+    "alunos": [
+        {
+            "nome": "Ana",
+            "nota": 90
+        },
+        {
+            "nome": "Bob",
+            "nota": 85
+        }
+    ],
+    "ativo": true
+}
