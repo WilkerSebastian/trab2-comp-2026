@@ -382,28 +382,1028 @@ static void gen_expr(Emissor *em, const Gramatica *g, const Expr *e) {
 /* Expressoes regulares de TOKENS (modo proprio)                      */
 /* ------------------------------------------------------------------ */
 
-/* Emite a funcao
- *     static size_t <nome>(const char *s)
- * que devolve o comprimento do MAIOR prefixo de s reconhecido pela
- * expressao regular, ou 0 se nenhum prefixo for reconhecido.
- * Retorna 0 se a expressao for valida (senao reporte com diag_erro). */
-static int gen_casamento_regex(FILE *f, const char *nome, const char *regex)
-{
-    /* TODO(aluno): converter a expressao regular em automato finito
-     * deterministico (por exemplo: analisar a expressao, construir o AFN
-     * de Thompson e determiniza-lo pela construcao de subconjuntos) e
-     * emitir o automato como codigo C: um switch sobre o estado, com as
-     * transicoes por faixas de caracteres, guardando a ultima posicao em
-     * que o automato passou por um estado final. Subconjunto minimo:
-     * concatenacao, |, *, +, ?, parenteses, classes [a-z] e [^...], o
-     * ponto e escapes como \n, \t, \\ e \/.
-     *
-     * O stub abaixo nao reconhece nada. */
-    fprintf(f, "static size_t %s(const char *s)\n{\n", nome);
-    fputs("    /* TODO(aluno): automato para ", f);
-    emitir_comentario(f, regex);
-    fputs(" */\n    (void) s;\n    return 0;\n}\n\n", f);
+typedef struct {
+    int de;
+    int para;
+    unsigned char *conj;
+} TransAFN;
+
+typedef struct {
+    int nestados;
+    TransAFN *trans;
+    int ntrans;
+    int captrans;
+} AFN;
+
+typedef struct { 
+    int ini; 
+    int fim; 
+} FragAFN;
+
+typedef struct {
+    const char *s;
+    size_t pos;
+    AFN *afn;
+} RegParser;
+
+typedef struct {
+    int de;
+    int para;
+    unsigned char conj[256];
+} TransAFD;
+
+typedef struct {
+    int nestados;
+    unsigned char **conjuntos;
+    int *final;
+    TransAFD *trans;
+    int ntrans;
+    int captrans;
+} AFD;
+
+static FragAFN parse_alt(RegParser *rp);
+static FragAFN parse_concat(RegParser *rp);
+static FragAFN parse_quant(RegParser *rp);
+static FragAFN parse_base(RegParser *rp);
+static void emitir_char_c(FILE *f, int c);
+static void emitir_cond_conjunto(FILE *f, const unsigned char *conj);
+
+static void afn_iniciar(AFN *a) {
+
+    a->nestados = 0;
+    a->trans = NULL;
+    a->ntrans = 0;
+    a->captrans = 0;
+
+}
+
+static int afn_novo_estado(AFN *a) {
+    return a->nestados++;
+}
+
+static void afn_add_trans(AFN *a, int de, int para, const unsigned char *conj) {
+
+    TransAFN *t;
+
+    if (a->ntrans == a->captrans) {
+
+        a->captrans = a->captrans ? 2 * a->captrans : 16;
+
+        a->trans = (TransAFN*)xrealloc(a->trans, (size_t) a->captrans * sizeof(TransAFN));
+
+    }
+
+    t = &a->trans[a->ntrans++];
+    t->de = de;
+    t->para = para;
+
+    if (conj == NULL)    
+        t->conj = NULL;
+
+    else {
+
+        t->conj = (unsigned char*)xmalloc(256);
+
+        memcpy(t->conj, conj, 256);
+
+    }
+
+}
+
+static void afn_add_epsilon(AFN *a, int de, int para) {
+    afn_add_trans(a, de, para, NULL);
+}
+
+static void afn_liberar(AFN *a) {
+
+    int i;
+    
+    for (i = 0; i < a->ntrans; i++)
+        free(a->trans[i].conj);
+    
+    free(a->trans);
+    
+    a->trans = NULL;
+    
+    a->ntrans = a->captrans = a->nestados = 0;
+
+}
+
+static FragAFN frag_criar(int ini, int fim) {
+
+    FragAFN f;
+    f.ini = ini;
+    f.fim = fim;
+    
+    return f;
+
+}
+
+static FragAFN frag_epsilon(AFN *a) {
+
+    int i = afn_novo_estado(a);
+    
+    int f = afn_novo_estado(a);
+    
+    afn_add_epsilon(a, i, f);
+    
+    return frag_criar(i, f);
+
+}
+
+static FragAFN thompson_conj(AFN *a, const unsigned char *conj) {
+
+    int i = afn_novo_estado(a);
+    
+    int f = afn_novo_estado(a);
+
+    afn_add_trans(a, i, f, conj);
+
+    return frag_criar(i, f);
+
+}
+
+static FragAFN thompson_char(AFN *a, int c) {
+
+    unsigned char conj[256];
+    
+    memset(conj, 0, 256);
+    
+    conj[c] = 1;
+    
+    return thompson_conj(a, conj);
+
+}
+
+static FragAFN thompson_concat(AFN *a, FragAFN x, FragAFN y) {
+
+    afn_add_epsilon(a, x.fim, y.ini);
+    
+    return frag_criar(x.ini, y.fim);
+
+}
+
+static FragAFN thompson_alt(AFN *a, FragAFN x, FragAFN y) {
+
+    int i = afn_novo_estado(a), f = afn_novo_estado(a);
+    
+    afn_add_epsilon(a, i, x.ini);
+    
+    afn_add_epsilon(a, i, y.ini);
+    
+    afn_add_epsilon(a, x.fim, f);
+    
+    afn_add_epsilon(a, y.fim, f);
+    
+    return frag_criar(i, f);
+
+}
+
+static FragAFN thompson_star(AFN *a, FragAFN x) {
+
+    int i = afn_novo_estado(a), f = afn_novo_estado(a);
+    
+    afn_add_epsilon(a, i, x.ini);
+    
+    afn_add_epsilon(a, i, f);
+    
+    afn_add_epsilon(a, x.fim, x.ini);
+    
+    afn_add_epsilon(a, x.fim, f);
+    
+    return frag_criar(i, f);
+
+}
+
+static FragAFN thompson_plus(AFN *a, FragAFN x) {
+
+    int i = afn_novo_estado(a), f = afn_novo_estado(a);
+    
+    afn_add_epsilon(a, i, x.ini);
+    
+    afn_add_epsilon(a, x.fim, x.ini);
+    
+    afn_add_epsilon(a, x.fim, f);
+    
+    return frag_criar(i, f);
+
+}
+
+static FragAFN thompson_opt(AFN *a, FragAFN x) {
+
+    int i = afn_novo_estado(a), f = afn_novo_estado(a);
+    
+    afn_add_epsilon(a, i, x.ini);
+    
+    afn_add_epsilon(a, i, f);
+    
+    afn_add_epsilon(a, x.fim, f);
+    
+    return frag_criar(i, f);
+
+}
+
+static int rp_fim(const RegParser *rp) {
+
+    return rp->s[rp->pos] == '\0';
+
+}
+
+static int rp_atual(const RegParser *rp) {
+
+    return (unsigned char) rp->s[rp->pos];
+
+}
+
+static int ler_char(RegParser *rp) {
+
+    int c;
+    
+    if (rp_fim(rp))
+        return -1;
+    
+    c = rp_atual(rp);
+    
+    rp->pos++;
+    
+    if (c == '\\') {
+
+        if (rp_fim(rp))
+            return '\\';
+
+        c = rp_atual(rp);
+
+        rp->pos++;
+
+        switch (c) {
+        
+            case 'n': 
+                return '\n';
+
+            case 't':
+                return '\t';
+
+            case 'r':
+                return '\r';
+
+            case 'a':
+                return '\a';
+
+            case 'f':
+                return '\f';
+
+            case 'v':
+                return '\v';
+
+            case '0':
+                return 0;
+
+            default:  
+                return c;
+
+        }
+
+    }
+
+    return c;
+
+}
+
+static int parse_classe(RegParser *rp, unsigned char *conj) {
+
+    int negar = 0;
+
+    int i;
+
+    int a;
+
+    int b;
+
+    memset(conj, 0, 256);
+
+    if (!rp_fim(rp) && rp_atual(rp) == '^') {
+
+        negar = 1;
+
+        rp->pos++;
+
+    }
+
+    while (!rp_fim(rp) && rp_atual(rp) != ']') {
+
+        a = ler_char(rp);
+
+        if (!rp_fim(rp) && rp_atual(rp) == '-' && rp->s[rp->pos + 1] != '\0' && rp->s[rp->pos + 1] != ']') {
+
+            rp->pos++;
+
+            b = ler_char(rp);
+
+            for (i = a; i <= b; i++)
+                conj[i] = 1;
+
+        } else
+            conj[a] = 1;
+        
+    }
+
+    if (rp_fim(rp)) {
+    
+        diag_erro(0, 0, "classe '[...]' nao terminada na expressao regular");
+
+        return -1;
+
+    }
+
+    rp->pos++;
+
+    if (negar) {
+
+        for (i = 1; i < 256; i++)
+            conj[i] = !conj[i];
+    
+        conj[0] = 0;
+    
+    }
+
     return 0;
+
+}
+
+static int inicia_base(RegParser *rp) {
+
+    int c;
+    
+    if (rp_fim(rp))
+        return 0;
+    
+    c = rp_atual(rp);
+    
+    return c != '|' && c != ')';
+
+}
+
+static FragAFN parse_base(RegParser *rp) {
+
+    unsigned char conj[256];
+    
+    int c;
+    
+    if (rp_fim(rp)) {
+    
+        diag_erro(0, 0, "expressao regular terminou inesperadamente");
+    
+        return frag_epsilon(rp->afn);
+    
+    }
+
+    c = rp_atual(rp);
+
+    if (c == '(') {
+    
+        FragAFN f;
+    
+        rp->pos++;
+    
+        f = parse_alt(rp);
+    
+        if (rp_fim(rp) || rp_atual(rp) != ')') {
+            
+            diag_erro(0, 0, "esperado ')' na expressao regular");
+            
+            return f;
+        
+        }
+        
+        rp->pos++;
+        
+        return f;
+    
+    }
+    
+    if (c == '[') {
+    
+        rp->pos++;
+    
+        if (parse_classe(rp, conj) != 0)
+            return frag_epsilon(rp->afn);
+    
+            return thompson_conj(rp->afn, conj);
+    
+    }
+
+    if (c == '.') {
+    
+        rp->pos++;
+    
+        memset(conj, 1, 256);
+    
+        conj[0] = 0;
+    
+        return thompson_conj(rp->afn, conj);
+    }
+
+    if (c == ')' || c == '|') {
+    
+        diag_erro(0, 0, "expressao regular invalida perto de '%c'", c);
+    
+        return frag_epsilon(rp->afn);
+    
+    }
+
+    c = ler_char(rp);
+    
+    return thompson_char(rp->afn, c);
+
+}
+
+static FragAFN parse_quant(RegParser *rp) {
+
+    FragAFN f = parse_base(rp);
+    
+    if (!rp_fim(rp)) {
+    
+        int c = rp_atual(rp);
+    
+        if (c == '*') { 
+            
+            rp->pos++; 
+            
+            f = thompson_star(rp->afn, f); 
+        }
+        else if (c == '+') { 
+            
+            rp->pos++; 
+            
+            f = thompson_plus(rp->afn, f); 
+        
+        }
+        else if (c == '?')
+            rp->pos++; f = thompson_opt(rp->afn, f); 
+    
+    }
+
+    return f;
+
+}
+
+static FragAFN parse_concat(RegParser *rp) {
+
+    FragAFN f, g;
+    
+    if (!inicia_base(rp))
+        return frag_epsilon(rp->afn);
+    
+    f = parse_quant(rp);
+    
+    while (inicia_base(rp)) {
+    
+        g = parse_quant(rp);
+    
+        f = thompson_concat(rp->afn, f, g);
+    
+    }
+    
+    return f;
+
+}
+
+static FragAFN parse_alt(RegParser *rp) {
+
+    FragAFN f = parse_concat(rp);
+    
+    while (!rp_fim(rp) && rp_atual(rp) == '|') {
+
+        rp->pos++;
+        
+        f = thompson_alt(rp->afn, f, parse_concat(rp));
+    
+    }
+    
+    return f;
+
+}
+
+static int vazio_bytes(const unsigned char *v, int n) {
+
+    int i;
+    
+    for (i = 0; i < n; i++)
+        if (v[i])
+            return 0;
+    
+    return 1;
+
+}
+
+static void fecho_epsilon(const AFN *a, unsigned char *conj) {
+
+    int *pilha = (int*)xmalloc((size_t) a->nestados * sizeof(int));
+
+    int topo = 0, e, i;
+
+    for (e = 0; e < a->nestados; e++)
+        if (conj[e])
+            pilha[topo++] = e;
+
+    while (topo > 0) {
+    
+        e = pilha[--topo];
+    
+        for (i = 0; i < a->ntrans; i++)
+            if (a->trans[i].de == e && a->trans[i].conj == NULL && !conj[a->trans[i].para]) {
+                
+                conj[a->trans[i].para] = 1;
+                
+                pilha[topo++] = a->trans[i].para;
+            
+            }
+
+    }
+    
+    free(pilha);
+
+}
+
+static int afd_add_estado(AFD *d, const AFN *a, const unsigned char *conj) {
+
+    d->conjuntos = (unsigned char **)xrealloc(d->conjuntos, (size_t) (d->nestados + 1) * sizeof(unsigned char *));
+
+    d->conjuntos[d->nestados] = (unsigned char *)xmalloc((size_t) a->nestados);
+    
+    memcpy(d->conjuntos[d->nestados], conj, (size_t) a->nestados);
+    
+    return d->nestados++;
+
+}
+
+static int afd_busca_estado(const AFD *d, const AFN *a, const unsigned char *conj) {
+
+    int i;
+    
+    for (i = 0; i < d->nestados; i++)
+        if (memcmp(d->conjuntos[i], conj, (size_t) a->nestados) == 0)
+            return i;
+    
+    return -1;
+
+}
+
+static void afd_add_trans(AFD *d, int de, int para, const unsigned char *conj) {
+
+    if (d->ntrans == d->captrans) {
+    
+        d->captrans = d->captrans ? 2 * d->captrans : 16;
+    
+        d->trans = (TransAFD*)xrealloc(d->trans, (size_t) d->captrans * sizeof(TransAFD));
+
+    }
+
+    d->trans[d->ntrans].de = de;
+    
+    d->trans[d->ntrans].para = para;
+    
+    memcpy(d->trans[d->ntrans].conj, conj, 256);
+    
+    d->ntrans++;
+
+}
+
+static void construir_afd(AFN *a, int estado_inicial, int estado_final, AFD *d) {
+
+    int *fila;
+
+    int capfila = 16;
+
+    int ini_fila = 0;
+
+    int fim_fila = 0;
+
+    unsigned char *atual, *destino, *S, *conj_temp;
+
+    int destino_de_c[256];
+    
+    int *visto;
+    
+    int e_atual, e, c, c2, i, idx;
+
+    memset(d, 0, sizeof *d);
+
+    atual = (unsigned char*)xcalloc((size_t) a->nestados, 1);
+    
+    atual[estado_inicial] = 1;
+    
+    fecho_epsilon(a, atual);
+    
+    afd_add_estado(d, a, atual);
+    
+    free(atual);
+
+    fila = (int*)xmalloc((size_t) capfila * sizeof(int));
+
+    fila[fim_fila++] = 0;
+
+    destino = (unsigned char*)xcalloc((size_t) a->nestados, 1);
+    
+    conj_temp = (unsigned char*)xmalloc(256);
+
+    while (ini_fila < fim_fila) {
+
+        e_atual = fila[ini_fila++];
+
+        S = (unsigned char*)xmalloc((size_t) a->nestados);
+        
+        memcpy(S, d->conjuntos[e_atual], (size_t) a->nestados);
+
+        for (c = 0; c < 256; c++) {
+
+            memset(destino, 0, (size_t) a->nestados);
+            
+            for (e = 0; e < a->nestados; e++) {
+            
+                if (!S[e])
+                    continue;
+            
+                for (i = 0; i < a->ntrans; i++) {
+                    
+                    if (a->trans[i].de == e && a->trans[i].conj != NULL && a->trans[i].conj[c])
+                        destino[a->trans[i].para] = 1;
+
+                }
+
+            }
+
+            if (vazio_bytes(destino, a->nestados)) {
+
+                destino_de_c[c] = -1;
+                
+                continue;
+            
+            }
+
+            fecho_epsilon(a, destino);
+
+            idx = afd_busca_estado(d, a, destino);
+            
+            if (idx < 0) {
+            
+                idx = afd_add_estado(d, a, destino);
+            
+                if (fim_fila == capfila) {
+            
+                    capfila *= 2;
+            
+                    fila = (int *) xrealloc(fila, (size_t) capfila * sizeof(int));
+            
+                }
+            
+                fila[fim_fila++] = idx;
+            
+            }
+            
+            destino_de_c[c] = idx;
+        
+        }
+
+        visto = (int*)xcalloc((size_t) d->nestados, sizeof(int));
+
+        for (c = 0; c < 256; c++) {
+            
+            if (destino_de_c[c] < 0)
+                continue;
+            
+            idx = destino_de_c[c];
+            
+            if (visto[idx])
+                continue;
+            
+            visto[idx] = 1;
+            
+            memset(conj_temp, 0, 256);
+            
+            for (c2 = 0; c2 < 256; c2++)
+                if (destino_de_c[c2] == idx)
+                    conj_temp[c2] = 1;
+            
+            afd_add_trans(d, e_atual, idx, conj_temp);
+        
+        }
+
+        free(visto);
+
+        free(S);
+
+    }
+
+    free(fila);
+    
+    free(destino);
+    
+    free(conj_temp);
+
+    d->final = (int *) xcalloc((size_t) d->nestados, sizeof(int));
+    
+    for (e = 0; e < d->nestados; e++)
+        d->final[e] = d->conjuntos[e][estado_final];
+    
+}
+
+static void afd_liberar(AFD *d) {
+
+    int i;
+    
+    for (i = 0; i < d->nestados; i++)
+        free(d->conjuntos[i]);
+    
+    free(d->conjuntos);
+    
+    free(d->final);
+    
+    free(d->trans);
+    
+    memset(d, 0, sizeof *d);
+
+}
+
+static void emitir_char_c(FILE *f, int c) {
+
+    switch (c) {
+
+        case '\n':
+
+            fputs("'\\n'", f); 
+            
+            break;
+
+        case '\t':
+
+            fputs("'\\t'", f); 
+            
+            break;
+
+        case '\r':
+
+            fputs("'\\r'", f); 
+            
+            break;
+
+        case '\a':
+
+            fputs("'\\a'", f); 
+            
+            break;
+
+        case '\f':
+
+            fputs("'\\f'", f); 
+            
+            break;
+
+        case '\v':
+
+            fputs("'\\v'", f); 
+            
+            break;
+
+        case '\0':
+
+            fputs("'\\0'", f); 
+            
+            break;
+
+        case '\\': 
+
+            fputs("'\\\\'", f);
+            
+            break;
+
+        case '\'': 
+
+            fputs("'\\''", f); 
+            
+            break;
+
+        default:
+
+            if (c >= 32 && c < 127)
+                fprintf(f, "'%c'", c);
+    
+            else
+                fprintf(f, "%d", c);
+
+    }
+
+}
+
+static void emitir_cond_conjunto(FILE *f, const unsigned char *conj) {
+
+    int c;
+
+    int ini;
+
+    int fim;
+
+    int primeiro = 1;
+    
+    c = 0;
+    
+    while (c < 256) {
+
+        if (!conj[c]) { 
+            
+            c++; 
+            
+            continue;
+
+        }
+
+        ini = c;
+        
+        while (c + 1 < 256 && conj[c + 1])
+            c++;
+        
+        fim = c;
+        
+        if (!primeiro)
+            fputs(" || ", f);
+        
+        primeiro = 0;
+
+        if (ini == 0 && fim == 255)
+            fputs("1", f);
+
+        else if (ini == fim) {
+            
+            fputs("c == ", f);
+            
+            emitir_char_c(f, ini);
+        } 
+        else if (ini == 0) {
+            
+            fputs("c <= ", f);
+            
+            emitir_char_c(f, fim);
+        
+        } 
+        else if (fim == 255) {
+            
+            fputs("c >= ", f);
+            
+            emitir_char_c(f, ini);
+        
+        } 
+        else {
+            
+            fputs("(c >= ", f);
+            
+            emitir_char_c(f, ini);
+            
+            fputs(" && c <= ", f);
+            
+            emitir_char_c(f, fim);
+            
+            fputs(")", f);
+        
+        }
+
+        c++;
+
+    }
+
+    if (primeiro)
+        fputs("0", f);
+
+}
+
+static void emitir_registra_final(FILE *f, const AFD *d) {
+
+    int e;
+    
+    int primeiro = 1;
+    
+    for (e = 0; e < d->nestados; e++) {
+    
+        if (!d->final[e])
+            continue;
+
+        if (primeiro)
+            fputs("        if (", f);
+
+        else
+            fputs(" || ", f);
+
+        fprintf(f, "estado == %d", e);
+    
+        primeiro = 0;
+    
+    }
+
+    if (!primeiro)
+        fputs(") melhor = pos;\n", f);
+
+}
+
+static void emitir_trans_estado(FILE *f, const AFD *d, int e) {
+
+    int i;
+
+    int primeiro = 1;
+    
+    for (i = 0; i < d->ntrans; i++) {
+
+        if (d->trans[i].de != e)
+            continue;
+
+        fputs(primeiro ? "            if (" : "            else if (", f);
+
+        emitir_cond_conjunto(f, d->trans[i].conj);
+
+        fprintf(f, ") { estado = %d; pos++; }\n", d->trans[i].para);
+
+        primeiro = 0;
+
+    }
+
+    if (primeiro)
+        fputs("            estado = -1;\n", f);
+    
+    else
+        fputs("            else estado = -1;\n", f);
+
+    }
+
+static void emitir_afd(FILE *f, const char *nome, const AFD *d) {
+
+    int e;
+
+    fprintf(f, "static size_t %s(const char *s)\n{\n", nome);
+    fputs("    size_t pos = 0, melhor = 0;\n", f);
+    fputs("    int estado = 0;\n", f);
+    fputs("    unsigned char c;\n", f);
+    fputs("    for (;;) {\n", f);
+    emitir_registra_final(f, d);
+    fputs("        c = (unsigned char) s[pos];\n", f);
+    fputs("        switch (estado) {\n", f);
+
+    for (e = 0; e < d->nestados; e++) {
+
+        fprintf(f, "        case %d:\n", e);
+
+        emitir_trans_estado(f, d, e);
+
+        fputs("            break;\n", f);
+
+    }
+
+    fputs("        default:\n", f);
+    fputs("            estado = -1;\n", f);
+    fputs("            break;\n", f);
+    fputs("        }\n", f);
+    fputs("        if (estado < 0) break;\n", f);
+    fputs("    }\n", f);
+    fputs("    return melhor;\n", f);
+    fputs("}\n\n", f);
+
+}
+
+static int gen_casamento_regex(FILE *f, const char *nome, const char *regex) {
+
+    AFN afn;
+    
+    AFD afd;
+    
+    RegParser rp;
+    
+    FragAFN raiz;
+
+    afn_iniciar(&afn);
+    
+    rp.s = regex;
+    rp.pos = 0;
+    rp.afn = &afn;
+
+    raiz = parse_alt(&rp);
+    
+    if (!rp_fim(&rp)) {
+    
+        diag_erro(0, 0, "expressao regular invalida %s: caractere inesperado %c", regex, rp_atual(&rp));
+        
+        afn_liberar(&afn);
+        
+        return -1;
+    
+    }
+
+    construir_afd(&afn, raiz.ini, raiz.fim, &afd);
+    
+    emitir_afd(f, nome, &afd);
+
+    afd_liberar(&afd);
+    
+    afn_liberar(&afn);
+    
+    return 0;
+
 }
 
 /* ------------------------------------------------------------------ */
