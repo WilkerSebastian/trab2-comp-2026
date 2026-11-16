@@ -14,3 +14,8 @@ Ferramenta: Qwen 3.8
 Trecho: src/codegen.c gen_casamento_regex e funções auxiliares
 Finalidade: Entender como converter cada expressão regular de TOKENS em um AFD.
 O que fiz:  A explicação foi usada para compreender o pipeline de regex pra AFN pra AFD pra C.
+
+Ferramenta: Qwen 3.8
+Trecho: src/ll1.c no verificar_opc_rep e microc/microc.flex regra EOF
+Finalidade: Diagnosticar duas falhas que apareceram ao rodar make test, a primeira sendo mensagem do aviso LL(1) estava incompleta, faltava o trecho" (resolvido de forma gulosa)", exigido pelo arquivo esperado testes/esperado/microc.gerador, fazendo o teste gramatica microc. O outro era flex emitia tres avisos "varias regras EOF para a condicao de inicio COMMENT/CHAR_STATE/STR_STATE", porque a regra EOF sem prefixo de estado conflitava com as regras especificas desses estados.
+O que fiz: Ajustei a string em reportar() dentro de verificar_opc_rep e restringir a regra EOF para INITIAL/EOF.
