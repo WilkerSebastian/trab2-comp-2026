@@ -263,7 +263,7 @@ ALFANUM     [a-zA-Z0-9_]
   * do flex), pois o token UNDEF tambem vale 0 no enum TokenType -- se
   * dependessemos do comportamento padrao, um erro lexico seria
   * confundido com o fim do arquivo pelo main() de teste abaixo. */
-<<EOF>>             { return END_OF_FILE; }
+<INITIAL><<EOF>>    { return END_OF_FILE; }
 
  /* --- Espacos em branco e quebras de linha ---------------------------- */
 \n                  { linha_atual++; }
@@ -345,8 +345,6 @@ ALFANUM     [a-zA-Z0-9_]
 
 <CHAR_STATE>\n      { 
 
-                        linha_atual++;
-
                         BEGIN(INITIAL);
 
                         microc_yylval.error_msg = "String nao terminada";
@@ -407,8 +405,6 @@ ALFANUM     [a-zA-Z0-9_]
                     }
     
 <STR_STATE>\n       { 
-
-                        linha_atual++;
 
                         BEGIN(INITIAL);
 
