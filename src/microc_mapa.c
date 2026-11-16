@@ -54,21 +54,118 @@ static void adicionar_nome(const char *s, size_t n)
     nomes[nnomes++] = xstrndup(s, n);
 }
 
-/* TODO(aluno): abrir o arquivo (ler_arquivo ajuda), localizar a
- * enumeracao "typedef enum { ... } TokenType;" e chamar adicionar_nome
- * para cada identificador da lista, ignorando comentarios e valores
- * explicitos ("X = 3"). Retorne 0 em caso de sucesso.
- * Enquanto nao implementada, a verificacao dos nomes e pulada. */
-int microc_carregar_tokens_h(const char *caminho)
-{
-    static int avisado = 0;
-    (void) adicionar_nome;
-    if (!avisado) {
-        diag_aviso(0, 0, "microc_carregar_tokens_h ainda nao implementado: nomes "
-                   "de %s nao verificados", caminho ? caminho : "tokens.h");
-        avisado = 1;
+static void pular_branco_comentario_tokens(const char **pp) {
+
+    const char *p = *pp;
+    
+    while (1) {
+
+        while (isspace((unsigned char) *p))
+            p++;
+
+        if (p[0] == '/' && p[1] == '*') {
+            
+            p += 2;
+            
+            while (*p != '\0' && !(p[0] == '*' && p[1] == '/'))
+                p++;
+            
+            if (*p == '\0')
+                break;
+            
+            p += 2;
+            
+            continue;
+        
+        }
+
+        if (p[0] == '/' && p[1] == '/') {
+    
+            while (*p != '\0' && *p != '\n')
+                p++;
+    
+            continue;
+        
+        }
+    
+        break;
+    
     }
-    return -1;
+
+    *pp = p;
+
+}
+
+int microc_carregar_tokens_h(const char *caminho) {
+    
+    char *fonte;
+    
+    const char *p;
+
+    if (caminho == NULL)
+        return -1;
+    
+    fonte = ler_arquivo(caminho);
+    
+    if (fonte == NULL) {
+        
+        diag_aviso(0, 0, "nao foi possivel abrir %s: nomes de TokenType nao verificados", caminho);
+    
+        return -1;
+    
+    }
+
+    p = strstr(fonte, "typedef enum");
+    
+    if (p != NULL)
+        p = strchr(p, '{');
+    
+    if (p == NULL) {
+        
+        diag_aviso(0, 0, "enumeracao TokenType nao encontrada em %s", caminho);
+        
+        free(fonte);
+        
+        return -1;
+    
+    }
+
+    p++;
+
+    while (1) {
+
+        pular_branco_comentario_tokens(&p);
+        
+        if (*p == '\0' || *p == '}')
+            break;
+        
+        if (isalpha((unsigned char) *p) || *p == '_') {
+        
+            const char *ini = p;
+        
+            while (isalnum((unsigned char) *p) || *p == '_')
+                p++;
+        
+            adicionar_nome(ini, (size_t) (p - ini));
+
+        } 
+        else
+            p++;
+
+    }
+
+    free(fonte);
+
+    if (nnomes == 0) {
+
+        diag_aviso(0, 0, "nenhum nome lido da enumeracao TokenType em %s", caminho);
+        
+        return -1;
+
+    }
+
+    return 0;
+
 }
 
 int microc_token_existe(const char *nome)
