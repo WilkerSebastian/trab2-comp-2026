@@ -785,10 +785,11 @@ static FragAFN parse_base(RegParser *rp) {
     
         rp->pos++;
     
-        if (parse_classe(rp, conj) != 0)
+        if (parse_classe(rp, conj) != 0) {
             return frag_epsilon(rp->afn);
+        }
     
-            return thompson_conj(rp->afn, conj);
+        return thompson_conj(rp->afn, conj);
     
     }
 
@@ -838,9 +839,14 @@ static FragAFN parse_quant(RegParser *rp) {
             f = thompson_plus(rp->afn, f); 
         
         }
-        else if (c == '?')
-            rp->pos++; f = thompson_opt(rp->afn, f); 
-    
+        else if (c == '?') {
+            
+            rp->pos++;
+            
+            f = thompson_opt(rp->afn, f); 
+        
+        }
+
     }
 
     return f;
@@ -1410,32 +1416,125 @@ static int gen_casamento_regex(FILE *f, const char *nome, const char *regex) {
 /* Leitura do arquivo de tokens (opcao --tokens do analisador gerado) */
 /* ------------------------------------------------------------------ */
 
-/* Emite "static Token token_de_arquivo(void)", que le o proximo token
- * do arquivo aberto em arquivo_tokens, no formato gravado pelo lexer do
- * TP1 (livro-texto, secao 3.3.2):
- *
- *   Token: tipo = <numero>, lexema = '<texto>', linha = <numero>
- *
- * Ao chegar ao fim do arquivo devolve um token TOKEN_FIM. */
-static void gen_token_de_arquivo(FILE *f, int microc)
-{
-    /* TODO(aluno): emitir a leitura real com fgets + sscanf (formato
-     * acima). Linhas em branco sao ignoradas; uma linha malformada deve
-     * ser reportada com o numero da linha do arquivo de tokens. */
-    static const char *const linhas[] = {
-        "static Token token_de_arquivo(void)",
-        "{",
-        "    Token t;",
-        "    memset(&t, 0, sizeof t);",
-        "    fprintf(stderr, \"opcao --tokens ainda nao implementada\\n\");",
-        "    exit(EXIT_FAILURE);",
-        "    return t;",
-        "}",
-        "",
-        NULL
-    };
-    (void) microc;
-    emit_linhas(f, linhas);
+static void emitir_mapa_tipo_token(FILE *f, const Gramatica *g) {
+
+    int i;
+    
+    const char *nome;
+    
+    fputs("static int tipo_token_do_arquivo(int numero, int linha_arquivo)\n{\n", f);
+    fputs("    switch (numero) {\n", f);
+    
+    for (i = 0; i < g->nterms; i++) {
+
+        if (i == TERM_FIM)
+            nome = "END_OF_FILE";
+        
+        else if (g->terms[i].literal)
+            nome = microc_nome_literal(g->terms[i].nome);
+        
+        else
+            nome = g->terms[i].nome;
+        
+        if (nome == NULL)
+            continue;
+        
+         fprintf(f, "    case %d: return %s;\n", i, g->terms[i].nome_c);
+    
+    }
+
+    fputs("    default:\n", f);
+    fputs("        fprintf(stderr, \"arquivo de tokens: tipo %d nao corresponde \"\n", f);
+    fputs("                        \"a nenhum token da gramatica (linha %d do arquivo)\\n\",\n", f);
+    fputs("                numero, linha_arquivo);\n", f);
+    fputs("        exit(EXIT_FAILURE);\n", f);
+    fputs("    }\n}\n\n", f);
+
+}
+
+static void gen_token_de_arquivo(FILE *f, const Gramatica *g, int microc) {
+
+    if (!microc)
+        emitir_mapa_tipo_token(f, g);
+
+    fputs("static int ler_linha_tokens(FILE *f, char *buf, size_t tam)\n{\n", f);
+    fputs("    size_t n;\n", f);
+    fputs("    if (fgets(buf, (int) tam, f) == NULL)\n", f);
+    fputs("        return -1;\n", f);
+    fputs("    n = strlen(buf);\n", f);
+    fputs("    if (n > 0 && buf[n - 1] == '\\n')\n", f);
+    fputs("        buf[--n] = '\\0';\n", f);
+    fputs("    else if (n + 1 == tam)\n", f);
+    fputs("        return -2;\n", f);
+    fputs("    return (int) n;\n", f);
+    fputs("}\n\n", f);
+    fputs("static Token token_de_arquivo(void)\n{\n", f);
+    fputs("    Token t;\n", f);
+    fputs("    char buf[1024], *p, *q;\n", f);
+    fputs("    long v;\n", f);
+    fputs("    int n, tipo, linha_arquivo = 0;\n", f);
+    fputs("    size_t i;\n", f);
+    fputs("    for (;;) {\n", f);
+    fputs("        if ((n = ler_linha_tokens(arquivo_tokens, buf, sizeof buf)) == -1) {\n", f);
+    fputs("            memset(&t, 0, sizeof t);\n", f);
+    fprintf(f, "            t.tipo = %s;\n", microc ? "END_OF_FILE" : "T_FIM");
+    fputs("            return t;\n", f);
+    fputs("        }\n", f);
+    fputs("        linha_arquivo++;\n", f);
+    fputs("        if (n == -2 || buf[0] == '\\0')\n", f);
+    fputs("            continue;   /* linha longa demais ou em branco */\n", f);
+    fputs("        if (strstr(buf, \"Token:\") == NULL)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        /* tipo = <numero> */\n", f);
+    fputs("        if ((p = strstr(buf, \"tipo = \")) == NULL)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        p += 7;\n", f);
+    fputs("        v = strtol(p, &q, 10);\n", f);
+    fputs("        if (q == p || *q != ',')\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        tipo = (int) v;\n", f);
+    fputs("        /* lexema = '<texto>' */\n", f);
+    fputs("        if ((p = strstr(q, \"lexema = '\")) == NULL)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        p += 10;\n", f);
+    fputs("        if ((q = strchr(p, '\\'')) == NULL)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        memset(&t, 0, sizeof t);\n", f);
+    fputs("        for (i = 0; p + i < q && i < sizeof t.lexema - 1; i++)\n", f);
+    fputs("            t.lexema[i] = p[i];\n", f);
+    fputs("        /* linha = <numero> */\n", f);
+    fputs("        if ((p = strstr(q, \"linha = \")) == NULL)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        p += 8;\n", f);
+    fputs("        v = strtol(p, &q, 10);\n", f);
+    fputs("        if (q == p)\n", f);
+    fputs("            goto malformada;\n", f);
+    fputs("        t.linha = (int) v;\n", f);
+
+    if (microc) {
+
+        fputs("        /* Os numeros ja sao os do TokenType do TP1; UNDEF traz a\n", f);
+        fputs("         * mensagem de erro no lexema e e tratado pelo avancar(). */\n", f);
+        fputs("        if (tipo < 0 || tipo > (int) PRINT) {\n", f);
+        fputs("            fprintf(stderr, \"arquivo de tokens: tipo %d fora do intervalo \"\n", f);
+        fputs("                            \"de TokenType (linha %d do arquivo)\\n\",\n", f);
+        fputs("                    tipo, linha_arquivo);\n", f);
+        fputs("            exit(EXIT_FAILURE);\n", f);
+        fputs("        }\n", f);
+        fputs("        t.tipo = (TokenType) tipo;\n", f);
+
+    } 
+    else
+        fputs("        t.tipo = tipo_token_do_arquivo(tipo, linha_arquivo);\n", f);
+    
+    fputs("        return t;\n", f);
+    fputs("    }\n", f);
+    fputs("malformada:\n", f);
+    fputs("    fprintf(stderr, \"arquivo de tokens: linha %d malformada\\n\",\n", f);
+    fputs("            linha_arquivo);\n", f);
+    fputs("    exit(EXIT_FAILURE);\n", f);
+    fputs("}\n\n", f);
+
 }
 
 /* ------------------------------------------------------------------ */
@@ -1879,7 +1978,7 @@ static int gerar_c(const Gramatica *g, const OpcoesGeracao *op)
     gerar_nome_token(f, g);
     gerar_posicao_e_avancar(f, op->microc);
     emit_linhas(f, rt_primitivas);
-    gen_token_de_arquivo(f, op->microc);
+    gen_token_de_arquivo(f, g, op->microc);
 
     rewind(corpo);
     while ((c = fgetc(corpo)) != EOF)
